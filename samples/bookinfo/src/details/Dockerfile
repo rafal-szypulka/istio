@@ -23,5 +23,7 @@ ENV ENABLE_EXTERNAL_BOOK_SERVICE ${enable_external_book_service:-false}
 
 EXPOSE 9080
 WORKDIR /opt/microservices
+# COPY Gemfile /opt/microservices
+RUN gem install instana
 
 CMD ["ruby", "details.rb", "9080"]

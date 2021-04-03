@@ -12,8 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-FROM node:12.18.1-slim
-
+# FROM node:12.18.1-slim
+FROM node:10
+ENV INSTANA_AUTO_PROFILE true
 COPY package.json /opt/microservices/
 COPY ratings.js /opt/microservices/
 WORKDIR /opt/microservices

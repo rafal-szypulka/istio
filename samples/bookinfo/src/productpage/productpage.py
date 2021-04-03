@@ -19,12 +19,12 @@ from __future__ import print_function
 from flask_bootstrap import Bootstrap
 from flask import Flask, request, session, render_template, redirect, url_for
 from flask import _request_ctx_stack as stack
-from jaeger_client import Tracer, ConstSampler
-from jaeger_client.reporter import NullReporter
-from jaeger_client.codecs import B3Codec
-from opentracing.ext import tags
-from opentracing.propagation import Format
-from opentracing_instrumentation.request_context import get_current_span, span_in_context
+# from jaeger_client import Tracer, ConstSampler
+# from jaeger_client.reporter import NullReporter
+# from jaeger_client.codecs import B3Codec
+# from opentracing.ext import tags
+# from opentracing.propagation import Format
+# from opentracing_instrumentation.request_context import get_current_span, span_in_context
 import simplejson as json
 import requests
 import sys
@@ -33,6 +33,7 @@ import logging
 import requests
 import os
 import asyncio
+import instana
 
 # These two lines enable debugging at httplib level (requests->urllib3->http.client)
 # You will see the REQUEST, including HEADERS and DATA, and RESPONSE with HEADERS but without DATA.
@@ -116,128 +117,128 @@ service_dict = {
 # extract/inject context, etc.
 
 # A very basic OpenTracing tracer (with null reporter)
-tracer = Tracer(
-    one_span_per_rpc=True,
-    service_name='productpage',
-    reporter=NullReporter(),
-    sampler=ConstSampler(decision=True),
-    extra_codecs={Format.HTTP_HEADERS: B3Codec()}
-)
+# tracer = Tracer(
+#     one_span_per_rpc=True,
+#     service_name='productpage',
+#     reporter=NullReporter(),
+#     sampler=ConstSampler(decision=True),
+#     extra_codecs={Format.HTTP_HEADERS: B3Codec()}
+# )
 
 
-def trace():
-    '''
-    Function decorator that creates opentracing span from incoming b3 headers
-    '''
-    def decorator(f):
-        def wrapper(*args, **kwargs):
-            request = stack.top.request
-            try:
-                # Create a new span context, reading in values (traceid,
-                # spanid, etc) from the incoming x-b3-*** headers.
-                span_ctx = tracer.extract(
-                    Format.HTTP_HEADERS,
-                    dict(request.headers)
-                )
-                # Note: this tag means that the span will *not* be
-                # a child span. It will use the incoming traceid and
-                # spanid. We do this to propagate the headers verbatim.
-                rpc_tag = {tags.SPAN_KIND: tags.SPAN_KIND_RPC_SERVER}
-                span = tracer.start_span(
-                    operation_name='op', child_of=span_ctx, tags=rpc_tag
-                )
-            except Exception as e:
-                # We failed to create a context, possibly due to no
-                # incoming x-b3-*** headers. Start a fresh span.
-                # Note: This is a fallback only, and will create fresh headers,
-                # not propagate headers.
-                span = tracer.start_span('op')
-            with span_in_context(span):
-                r = f(*args, **kwargs)
-                return r
-        wrapper.__name__ = f.__name__
-        return wrapper
-    return decorator
+# def trace():
+#     '''
+#     Function decorator that creates opentracing span from incoming b3 headers
+#     '''
+#     def decorator(f):
+#         def wrapper(*args, **kwargs):
+#             request = stack.top.request
+#             try:
+#                 # Create a new span context, reading in values (traceid,
+#                 # spanid, etc) from the incoming x-b3-*** headers.
+#                 span_ctx = tracer.extract(
+#                     Format.HTTP_HEADERS,
+#                     dict(request.headers)
+#                 )
+#                 # Note: this tag means that the span will *not* be
+#                 # a child span. It will use the incoming traceid and
+#                 # spanid. We do this to propagate the headers verbatim.
+#                 rpc_tag = {tags.SPAN_KIND: tags.SPAN_KIND_RPC_SERVER}
+#                 span = tracer.start_span(
+#                     operation_name='op', child_of=span_ctx, tags=rpc_tag
+#                 )
+#             except Exception as e:
+#                 # We failed to create a context, possibly due to no
+#                 # incoming x-b3-*** headers. Start a fresh span.
+#                 # Note: This is a fallback only, and will create fresh headers,
+#                 # not propagate headers.
+#                 span = tracer.start_span('op')
+#             with span_in_context(span):
+#                 r = f(*args, **kwargs)
+#                 return r
+#         wrapper.__name__ = f.__name__
+#         return wrapper
+#     return decorator
 
 
-def getForwardHeaders(request):
-    headers = {}
+# def getForwardHeaders(request):
+#     headers = {}
 
-    # x-b3-*** headers can be populated using the opentracing span
-    span = get_current_span()
-    carrier = {}
-    tracer.inject(
-        span_context=span.context,
-        format=Format.HTTP_HEADERS,
-        carrier=carrier)
+#     # x-b3-*** headers can be populated using the opentracing span
+#     span = get_current_span()
+#     carrier = {}
+#     tracer.inject(
+#         span_context=span.context,
+#         format=Format.HTTP_HEADERS,
+#         carrier=carrier)
 
-    headers.update(carrier)
+#     headers.update(carrier)
 
-    # We handle other (non x-b3-***) headers manually
-    if 'user' in session:
-        headers['end-user'] = session['user']
+#     # We handle other (non x-b3-***) headers manually
+#     if 'user' in session:
+#         headers['end-user'] = session['user']
 
-    # Keep this in sync with the headers in details and reviews.
-    incoming_headers = [
-        # All applications should propagate x-request-id. This header is
-        # included in access log statements and is used for consistent trace
-        # sampling and log sampling decisions in Istio.
-        'x-request-id',
+#     # Keep this in sync with the headers in details and reviews.
+#     incoming_headers = [
+#         # All applications should propagate x-request-id. This header is
+#         # included in access log statements and is used for consistent trace
+#         # sampling and log sampling decisions in Istio.
+#         'x-request-id',
 
-        # Lightstep tracing header. Propagate this if you use lightstep tracing
-        # in Istio (see
-        # https://istio.io/latest/docs/tasks/observability/distributed-tracing/lightstep/)
-        # Note: this should probably be changed to use B3 or W3C TRACE_CONTEXT.
-        # Lightstep recommends using B3 or TRACE_CONTEXT and most application
-        # libraries from lightstep do not support x-ot-span-context.
-        'x-ot-span-context',
+#         # Lightstep tracing header. Propagate this if you use lightstep tracing
+#         # in Istio (see
+#         # https://istio.io/latest/docs/tasks/observability/distributed-tracing/lightstep/)
+#         # Note: this should probably be changed to use B3 or W3C TRACE_CONTEXT.
+#         # Lightstep recommends using B3 or TRACE_CONTEXT and most application
+#         # libraries from lightstep do not support x-ot-span-context.
+#         'x-ot-span-context',
 
-        # Datadog tracing header. Propagate these headers if you use Datadog
-        # tracing.
-        'x-datadog-trace-id',
-        'x-datadog-parent-id',
-        'x-datadog-sampling-priority',
+#         # Datadog tracing header. Propagate these headers if you use Datadog
+#         # tracing.
+#         'x-datadog-trace-id',
+#         'x-datadog-parent-id',
+#         'x-datadog-sampling-priority',
 
-        # W3C Trace Context. Compatible with OpenCensusAgent and Stackdriver Istio
-        # configurations.
-        'traceparent',
-        'tracestate',
+#         # W3C Trace Context. Compatible with OpenCensusAgent and Stackdriver Istio
+#         # configurations.
+#         'traceparent',
+#         'tracestate',
 
-        # Cloud trace context. Compatible with OpenCensusAgent and Stackdriver Istio
-        # configurations.
-        'x-cloud-trace-context',
+#         # Cloud trace context. Compatible with OpenCensusAgent and Stackdriver Istio
+#         # configurations.
+#         'x-cloud-trace-context',
 
-        # Grpc binary trace context. Compatible with OpenCensusAgent nad
-        # Stackdriver Istio configurations.
-        'grpc-trace-bin',
+#         # Grpc binary trace context. Compatible with OpenCensusAgent nad
+#         # Stackdriver Istio configurations.
+#         'grpc-trace-bin',
 
-        # b3 trace headers. Compatible with Zipkin, OpenCensusAgent, and
-        # Stackdriver Istio configurations. Commented out since they are
-        # propagated by the OpenTracing tracer above.
-        # 'x-b3-traceid',
-        # 'x-b3-spanid',
-        # 'x-b3-parentspanid',
-        # 'x-b3-sampled',
-        # 'x-b3-flags',
+#         # b3 trace headers. Compatible with Zipkin, OpenCensusAgent, and
+#         # Stackdriver Istio configurations. Commented out since they are
+#         # propagated by the OpenTracing tracer above.
+#         # 'x-b3-traceid',
+#         # 'x-b3-spanid',
+#         # 'x-b3-parentspanid',
+#         # 'x-b3-sampled',
+#         # 'x-b3-flags',
 
-        # Application-specific headers to forward.
-        'user-agent',
-    ]
-    # For Zipkin, always propagate b3 headers.
-    # For Lightstep, always propagate the x-ot-span-context header.
-    # For Datadog, propagate the corresponding datadog headers.
-    # For OpenCensusAgent and Stackdriver configurations, you can choose any
-    # set of compatible headers to propagate within your application. For
-    # example, you can propagate b3 headers or W3C trace context headers with
-    # the same result. This can also allow you to translate between context
-    # propagation mechanisms between different applications.
+#         # Application-specific headers to forward.
+#         'user-agent',
+#     ]
+#     # For Zipkin, always propagate b3 headers.
+#     # For Lightstep, always propagate the x-ot-span-context header.
+#     # For Datadog, propagate the corresponding datadog headers.
+#     # For OpenCensusAgent and Stackdriver configurations, you can choose any
+#     # set of compatible headers to propagate within your application. For
+#     # example, you can propagate b3 headers or W3C trace context headers with
+#     # the same result. This can also allow you to translate between context
+#     # propagation mechanisms between different applications.
 
-    for ihdr in incoming_headers:
-        val = request.headers.get(ihdr)
-        if val is not None:
-            headers[ihdr] = val
+#     for ihdr in incoming_headers:
+#         val = request.headers.get(ihdr)
+#         if val is not None:
+#             headers[ihdr] = val
 
-    return headers
+#     return headers
 
 
 # The UI:
@@ -275,38 +276,50 @@ def logout():
 # a helper function for asyncio.gather, does not return a value
 
 
-async def getProductReviewsIgnoreResponse(product_id, headers):
-    getProductReviews(product_id, headers)
+# async def getProductReviewsIgnoreResponse(product_id, headers):
+#     getProductReviews(product_id, headers)
+
+async def getProductReviewsIgnoreResponse(product_id):
+    getProductReviews(product_id)
 
 # flood reviews with unnecessary requests to demonstrate Istio rate limiting, asynchoronously
 
 
-async def floodReviewsAsynchronously(product_id, headers):
-    # the response is disregarded
-    await asyncio.gather(*(getProductReviewsIgnoreResponse(product_id, headers) for _ in range(flood_factor)))
+# async def floodReviewsAsynchronously(product_id, headers):
+#     # the response is disregarded
+#     await asyncio.gather(*(getProductReviewsIgnoreResponse(product_id, headers) for _ in range(flood_factor)))
 
+async def floodReviewsAsynchronously(product_id):
+    # the response is disregarded
+    await asyncio.gather(*(getProductReviewsIgnoreResponse(product_id) for _ in range(flood_factor)))
 # flood reviews with unnecessary requests to demonstrate Istio rate limiting
 
 
-def floodReviews(product_id, headers):
+# def floodReviews(product_id, headers):
+#     loop = asyncio.new_event_loop()
+#     loop.run_until_complete(floodReviewsAsynchronously(product_id, headers))
+#     loop.close()
+
+def floodReviews(product_id):
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(floodReviewsAsynchronously(product_id, headers))
+    loop.run_until_complete(floodReviewsAsynchronously(product_id))
     loop.close()
 
-
 @app.route('/productpage')
-@trace()
+# @trace()
 def front():
     product_id = 0  # TODO: replace default value
-    headers = getForwardHeaders(request)
+    # headers = getForwardHeaders(request)
     user = session.get('user', '')
     product = getProduct(product_id)
-    detailsStatus, details = getProductDetails(product_id, headers)
+    # detailsStatus, details = getProductDetails(product_id, headers)
+    detailsStatus, details = getProductDetails(product_id)
 
     if flood_factor > 0:
-        floodReviews(product_id, headers)
+        # floodReviews(product_id, headers)
+        floodReviews(product_id)
 
-    reviewsStatus, reviews = getProductReviews(product_id, headers)
+    reviewsStatus, reviews = getProductReviews(product_id)
     return render_template(
         'productpage.html',
         detailsStatus=detailsStatus,
@@ -324,26 +337,26 @@ def productsRoute():
 
 
 @app.route('/api/v1/products/<product_id>')
-@trace()
+# @trace()
 def productRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, details = getProductDetails(product_id, headers)
+    # headers = getForwardHeaders(request)
+    status, details = getProductDetails(product_id)
     return json.dumps(details), status, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/products/<product_id>/reviews')
-@trace()
+# @trace()
 def reviewsRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, reviews = getProductReviews(product_id, headers)
+    # headers = getForwardHeaders(request)
+    status, reviews = getProductReviews(product_id)
     return json.dumps(reviews), status, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/products/<product_id>/ratings')
-@trace()
+# @trace()
 def ratingsRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, ratings = getProductRatings(product_id, headers)
+    # headers = getForwardHeaders(request)
+    status, ratings = getProductRatings(product_id)
     return json.dumps(ratings), status, {'Content-Type': 'application/json'}
 
 
@@ -366,10 +379,10 @@ def getProduct(product_id):
         return products[product_id]
 
 
-def getProductDetails(product_id, headers):
+def getProductDetails(product_id):
     try:
         url = details['name'] + "/" + details['endpoint'] + "/" + str(product_id)
-        res = requests.get(url, headers=headers, timeout=3.0)
+        res = requests.get(url, timeout=3.0)
     except BaseException:
         res = None
     if res and res.status_code == 200:
@@ -379,13 +392,13 @@ def getProductDetails(product_id, headers):
         return status, {'error': 'Sorry, product details are currently unavailable for this book.'}
 
 
-def getProductReviews(product_id, headers):
+def getProductReviews(product_id):
     # Do not remove. Bug introduced explicitly for illustration in fault injection task
     # TODO: Figure out how to achieve the same effect using Envoy retries/timeouts
     for _ in range(2):
         try:
             url = reviews['name'] + "/" + reviews['endpoint'] + "/" + str(product_id)
-            res = requests.get(url, headers=headers, timeout=3.0)
+            res = requests.get(url, timeout=3.0)
         except BaseException:
             res = None
         if res and res.status_code == 200:
@@ -394,10 +407,10 @@ def getProductReviews(product_id, headers):
     return status, {'error': 'Sorry, product reviews are currently unavailable for this book.'}
 
 
-def getProductRatings(product_id, headers):
+def getProductRatings(product_id):
     try:
         url = ratings['name'] + "/" + ratings['endpoint'] + "/" + str(product_id)
-        res = requests.get(url, headers=headers, timeout=3.0)
+        res = requests.get(url, timeout=3.0)
     except BaseException:
         res = None
     if res and res.status_code == 200:

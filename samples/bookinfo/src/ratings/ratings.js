@@ -12,6 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+const instana = require('@instana/collector');
+instana({
+  tracing: {
+      enabled: true
+  },
+  autoProfile: true
+});
 var http = require('http')
 var dispatcher = require('httpdispatcher')
 
